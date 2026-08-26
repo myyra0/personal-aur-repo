@@ -69,6 +69,7 @@ jobs:
       - name: Publish to a stable Release
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }} 
         run: |
           gh release view repo >/dev/null 2>&1 \
             && gh release upload repo repo/* --clobber \
