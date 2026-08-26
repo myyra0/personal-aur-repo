@@ -45,7 +45,7 @@ jobs:
           sudo -u builder bash -lc '
             for pkg in waywallen waywallen-display plasma-wallpaper-waywallen open-wallpaper-engine; do
               echo "::group::Building $pkg"
-              aur sync -S -d personalrepo --root /tmp/repo --noconfirm "$pkg" || echo "::warning::$pkg failed to build"
+              aur sync --noview -S -d personalrepo --root /tmp/repo --noconfirm "$pkg" || echo "::warning::$pkg failed to build"
               echo "::endgroup::"
             done
           '
