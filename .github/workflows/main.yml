@@ -36,6 +36,7 @@ jobs:
       - name: Register local repo
         run: |
           mkdir -p /tmp/repo && chown builder:builder /tmp/repo
+          sudo -u builder repo-add /tmp/repo/personalrepo.db.tar.gz
           printf "\n[personalrepo]\nSigLevel = Optional TrustAll\nServer = file:///tmp/repo\n" >> /etc/pacman.conf
           pacman -Sy --noconfirm
 
