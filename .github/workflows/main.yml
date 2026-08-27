@@ -2,15 +2,11 @@ name: build-personal-repo
 
 on:
   schedule:
-    - cron: '10 6 * * 0'
+    - cron: '10 6 * * *'   # everyday 6:10
   workflow_dispatch: {}
 
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        pkg: [waywallen, waywallen-display, plasma-wallpaper-waywallen, open-wallpaper-engine]
     runs-on: ubuntu-latest
     container:
       image: archlinux:base-devel
@@ -28,7 +24,14 @@ jobs:
           echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder
 
       - name: Import GPG signing key
-        run: echo "${{ secrets.GPG_PRIVATE_KEY }}" | base64 -d | sudo -u builder gpg --batch --import
+        run: |
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | base64 -d | sudo -u builder gpg --batch --import
+          
+          sudo -u builder gpg --armor --export > /tmp/repo-key.pub
+          pacman-key --add /tmp/repo-key.pub
+          
+          KEY_ID=$(sudo -u builder gpg --list-keys --with-colons | grep "^pub" | cut -d: -f5)
+          pacman-key --lsign-key "$KEY_ID"
 
       - name: Bootstrap aurutils
         run: |
@@ -40,50 +43,41 @@ jobs:
       - name: Register local repo
         run: |
           mkdir -p /tmp/repo && chown builder:builder /tmp/repo
+          sudo -u builder repo-add /tmp/repo/personalrepo.db.tar.gz
           printf "\n[personalrepo]\nSigLevel = Optional TrustAll\nServer = file:///tmp/repo\n" >> /etc/pacman.conf
           pacman -Sy --noconfirm
 
-      - name: Build ${{ matrix.pkg }}
+      - name: Build packages (each independent, so one failure doesn't block the rest)
         run: |
           sudo -u builder bash -lc '
-            aur sync --noview -S -d personalrepo --root /tmp/repo --noconfirm "${{ matrix.pkg }}"
+            for pkg in waywallen waywallen-display plasma-wallpaper-waywallen open-wallpaper-engine; do
+              echo "::group::Building $pkg"
+              aur sync --noview -S -d personalrepo --root /tmp/repo --noconfirm "$pkg" || echo "::warning::$pkg failed to build"
+              
+              # Clean up intermediate build files and pacman cache to save disk space
+              rm -rf /home/builder/.cache/aurutils/sync/*
+              sudo pacman -Scc --noconfirm
+              
+              echo "::endgroup::"
+            done
           '
 
-      - name: Upload this package's files (including .sig)
+      - name: Upload repo as build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: pkg-${{ matrix.pkg }}
-          path: /tmp/repo/*.pkg.tar.zst*
-          if-no-files-found: warn
+          name: personalrepo
+          path: /tmp/repo/*
 
   publish:
     needs: build
-    if: always()
     runs-on: ubuntu-latest
-    container:
-      image: archlinux:base-devel
     permissions:
       contents: write
-      actions: read
     steps:
-      - name: Init keyring and install tools
-        run: |
-          pacman-key --init
-          pacman-key --populate archlinux
-          pacman -Syu --noconfirm --needed pacman-contrib gnupg github-cli
-
       - uses: actions/download-artifact@v4
         with:
-          pattern: pkg-*
+          name: personalrepo
           path: repo
-          merge-multiple: true
-
-      - name: Import signing key and rebuild the repo database
-        run: |
-          echo "${{ secrets.GPG_PRIVATE_KEY }}" | base64 -d | gpg --batch --import
-          cd repo
-          repo-add -s personalrepo.db.tar.gz *.pkg.tar.zst
-
       - name: Publish to a stable Release
         env:
           GITHUB_TOKEN: ${{ github.token }}
