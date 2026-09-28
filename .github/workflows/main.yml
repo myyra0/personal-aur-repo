@@ -56,42 +56,6 @@ jobs:
 
       - name: Build packages
         run: |
-          # Spotify Soloist build
-          echo "::group::Building spotify-soloist-bin directly from Spotify CDN"
-          mkdir -p /tmp/soloist-build
-          cd /tmp/soloist-build
-
-          # Safely generate the PKGBUILD without heredoc indentation risks
-          echo 'pkgname=spotify-soloist-bin' > PKGBUILD
-          echo "pkgver=$(date +%Y%m%d)" >> PKGBUILD
-          echo 'pkgrel=1' >> PKGBUILD
-          echo 'pkgdesc="Official headless Spotify Connect client for Linux"' >> PKGBUILD
-          echo 'arch=("x86_64")' >> PKGBUILD
-          echo 'url="https://developer.spotify.com/documentation/soloist"' >> PKGBUILD
-          echo 'license=("LicenseRef-Spotify-Terms")' >> PKGBUILD
-          echo 'depends=("glibc" "libpipewire" "libpulse")' >> PKGBUILD
-          echo 'provides=("spotify-soloist")' >> PKGBUILD
-          echo 'conflicts=("spotify-soloist")' >> PKGBUILD
-          echo 'options=("!debug" "!strip")' >> PKGBUILD
-          echo 'source=("https://soloist-builds.spotifycdn.com/soloist_release_x86_64.tar.gz")' >> PKGBUILD
-          echo 'sha256sums=("SKIP")' >> PKGBUILD
-          echo 'package() {' >> PKGBUILD
-          echo '  install -Dm755 soloist "${pkgdir}/usr/bin/soloist"' >> PKGBUILD
-          echo '}' >> PKGBUILD
-
-          chown -R builder:builder /tmp/soloist-build
-
-          # Execute the soloist build
-          sudo -u builder bash -lc '
-            cd /tmp/soloist-build
-            makepkg -s --sign --noconfirm
-            cp *.pkg.tar.zst /tmp/repo/
-            repo-add /tmp/repo/personalrepo.db.tar.gz /tmp/repo/spotify-soloist-bin-*.pkg.tar.zst
-          '
-          cd /tmp
-          rm -rf /tmp/soloist-build
-          echo "::endgroup::"
-
           # Waywallen and related packages
           sudo -u builder bash -lc '
             packages=(
