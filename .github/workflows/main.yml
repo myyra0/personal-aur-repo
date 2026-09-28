@@ -2,7 +2,7 @@ name: build-personal-repo
 
 on:
   schedule:
-    - cron: '0 4 * * 6' 
+    - cron: '0 4 * * 6'
   workflow_dispatch: {}
 
 jobs:
@@ -25,39 +25,93 @@ jobs:
 
       - name: Import GPG signing key
         run: |
+          # Import secret key to builder's keyring
           echo "${{ secrets.GPG_PRIVATE_KEY }}" | base64 -d | sudo -u builder gpg --batch --import
-          
+
+          # Export public key and add to system pacman keyring
           sudo -u builder gpg --armor --export > /tmp/repo-key.pub
           pacman-key --add /tmp/repo-key.pub
-          
-          KEY_ID=$(sudo -u builder gpg --list-keys --with-colons | grep "^pub" | cut -d: -f5)
+
+          # Locally sign the key in pacman's keyring
+          KEY_ID=$(sudo -u builder gpg --list-keys --with-colons | grep "^pub" | cut -d: -f5 | head -n 1)
           pacman-key --lsign-key "$KEY_ID"
 
       - name: Bootstrap aurutils
         run: |
           sudo -u builder bash -lc '
-            cd /tmp && git clone https://aur.archlinux.org/aurutils.git &&
-            cd aurutils && makepkg -si --noconfirm
+            git clone https://aur.archlinux.org/aurutils.git /tmp/aurutils
+            cd /tmp/aurutils
+            makepkg -si --noconfirm
           '
 
       - name: Register local repo
         run: |
-          mkdir -p /tmp/repo && chown builder:builder /tmp/repo
+          mkdir -p /tmp/repo
+          chown builder:builder /tmp/repo
           sudo -u builder repo-add /tmp/repo/personalrepo.db.tar.gz
+
           printf "\n[personalrepo]\nSigLevel = Optional TrustAll\nServer = file:///tmp/repo\n" >> /etc/pacman.conf
+
           pacman -Sy --noconfirm
 
-      - name: Build packages (each independent, so one failure doesn't block the rest)
+      - name: Build packages
         run: |
+          # Spotify Soloist build
+          echo "::group::Building spotify-soloist-bin directly from Spotify CDN"
+          mkdir -p /tmp/soloist-build
+          cd /tmp/soloist-build
+
+          # Safely generate the PKGBUILD without heredoc indentation risks
+          echo 'pkgname=spotify-soloist-bin' > PKGBUILD
+          echo "pkgver=$(date +%Y%m%d)" >> PKGBUILD
+          echo 'pkgrel=1' >> PKGBUILD
+          echo 'pkgdesc="Official headless Spotify Connect client for Linux"' >> PKGBUILD
+          echo 'arch=("x86_64")' >> PKGBUILD
+          echo 'url="https://developer.spotify.com/documentation/soloist"' >> PKGBUILD
+          echo 'license=("LicenseRef-Spotify-Terms")' >> PKGBUILD
+          echo 'depends=("glibc" "libpipewire" "libpulse")' >> PKGBUILD
+          echo 'provides=("spotify-soloist")' >> PKGBUILD
+          echo 'conflicts=("spotify-soloist")' >> PKGBUILD
+          echo 'options=("!debug" "!strip")' >> PKGBUILD
+          echo 'source=("https://soloist-builds.spotifycdn.com/soloist_release_x86_64.tar.gz")' >> PKGBUILD
+          echo 'sha256sums=("SKIP")' >> PKGBUILD
+          echo 'package() {' >> PKGBUILD
+          echo '  install -Dm755 soloist "${pkgdir}/usr/bin/soloist"' >> PKGBUILD
+          echo '}' >> PKGBUILD
+
+          chown -R builder:builder /tmp/soloist-build
+
+          # Execute the soloist build
           sudo -u builder bash -lc '
-            for pkg in waywallen waywallen-display plasma-wallpaper-waywallen open-wallpaper-engine; do
+            cd /tmp/soloist-build
+            makepkg -s --noconfirm
+            cp *.pkg.tar.zst /tmp/repo/
+            repo-add /tmp/repo/personalrepo.db.tar.gz /tmp/repo/spotify-soloist-bin-*.pkg.tar.zst
+          '
+          cd /tmp
+          rm -rf /tmp/soloist-build
+          echo "::endgroup::"
+
+          # Waywallen and related packages
+          sudo -u builder bash -lc '
+            packages=(
+              "waywallen"
+              "waywallen-display"
+              "plasma-wallpaper-waywallen"
+              "open-wallpaper-engine"
+            )
+
+            for pkg in "${packages[@]}"; do
               echo "::group::Building $pkg"
-              aur sync --noview -S -d personalrepo --root /tmp/repo --noconfirm "$pkg" || echo "::warning::$pkg failed to build"
-              
-              # --- DISK SPACE FIX ---
+
+              if ! aur sync --noview -S -d personalrepo --root /tmp/repo --noconfirm "$pkg"; then
+                echo "::warning::$pkg failed to build"
+              fi
+
+              # Disk space fix (clean up cache after each build)
               rm -rf /home/builder/.cache/aurutils/sync/*
               sudo pacman -Scc --noconfirm
-              
+
               echo "::endgroup::"
             done
           '
@@ -67,6 +121,7 @@ jobs:
         with:
           name: personalrepo
           path: /tmp/repo/*
+          compression-level: 0
 
   publish:
     needs: build
@@ -74,10 +129,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v5
+      - name: Download artifact
+        uses: actions/download-artifact@v8
         with:
           name: personalrepo
           path: repo
+
       - name: Publish to a stable Release
         env:
           GITHUB_TOKEN: ${{ github.token }}
