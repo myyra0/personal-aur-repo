@@ -84,7 +84,7 @@ jobs:
           # Execute the soloist build
           sudo -u builder bash -lc '
             cd /tmp/soloist-build
-            makepkg -s --noconfirm
+            makepkg -s --sign --noconfirm
             cp *.pkg.tar.zst /tmp/repo/
             repo-add /tmp/repo/personalrepo.db.tar.gz /tmp/repo/spotify-soloist-bin-*.pkg.tar.zst
           '
